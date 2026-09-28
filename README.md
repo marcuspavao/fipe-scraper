@@ -13,6 +13,22 @@ Scraper robusto e de alto desempenho em Go que coleta preços de veículos da [T
 
 ---
 
+## 📋 Atalhos Rápidos (Makefile)
+
+O projeto possui atalhos padronizados para facilitar o uso local e em produção:
+
+```bash
+make check-setup   # 🔍 Verifica se Docker, Docker Compose, Go e .env estão configurados
+make setup         # ⚙️ Cria .env inicial e baixa dependências Go
+make build         # 🔨 Compila os binários (fipe-scraper e fipe-migrate) para Linux
+make up            # 🚀 Sobe a stack completa via Docker Compose (MongoDB + Migrate + Scraper)
+make down          # 🛑 Para e remove os containers Docker
+make test          # 🧪 Executa os testes unitários
+make deploy        # 📤 Envia binários e configurações para a VPS por SSH
+```
+
+---
+
 ## 📁 Estrutura do Projeto
 
 ```
@@ -22,7 +38,7 @@ fipe-scraper/
 │   └── migrate/main.go          # CLI de migrations do MongoDB
 ├── internal/
 │   ├── db/mongo.go              # Conexão e gerenciamento MongoDB
-│   ├── migrations/              # Definção e execução de migrations
+│   ├── migrations/              # Definição e execução de migrations
 │   ├── models/models.go         # Structs e mapeamento de dados
 │   └── scraper/                 # Cliente de API da FIPE e retentativas
 │       ├── fipe.go
@@ -39,7 +55,7 @@ fipe-scraper/
 
 ## ⚙️ Variáveis de Ambiente
 
-Crie um arquivo `.env` baseado no `.env.example`:
+Crie um arquivo `.env` baseado no `.env.example` (ou rode `make setup`):
 
 | Variável | Padrão | Descrição |
 |---|---|---|
@@ -68,27 +84,26 @@ O scraper aceita parâmetros para limitar a execução ou selecionar tabelas esp
 
 ### 1. Com Docker Compose (Recomendado para Desenvolvimento e Produção Isolada)
 
-Suba toda a stack (MongoDB, aplica as migrations automaticamente e inicia o scraper):
+Configuração rápida em 2 comandos:
 
 ```bash
-# Copie o arquivo .env
-cp .env.example .env
+# 1. Configurar ambiente
+make setup
 
-# Inicie os serviços
-docker compose up -d --build
+# 2. Subir a stack inteira (MongoDB + Migrate + Scraper)
+make up
+```
 
-# Ver os logs do scraper
+Para ver os logs do scraper:
+
+```bash
 docker compose logs -f scraper
 ```
 
-Para rodar comandos pontuais via Docker:
+Para parar os containers:
 
 ```bash
-# Rodar scraper com flags
-docker compose run scraper -marcas=5 -tabelas=1
-
-# Rodar status de migrations
-docker compose run migrate -cmd=status
+make down
 ```
 
 ---
@@ -135,7 +150,7 @@ Adicione a linha (executa todo dia 1 às 08:00):
 
 ```bash
 # Via Docker Compose:
-0 8 1 * * cd /opt/fipe-scraper && docker compose up --build -d
+0 8 1 * * cd /opt/fipe-scraper && make up
 
 # Ou via binário direto:
 0 8 1 * * cd /opt/fipe-scraper && ./fipe-scraper >> /opt/fipe-scraper/cron.log 2>&1
@@ -146,11 +161,14 @@ Adicione a linha (executa todo dia 1 às 08:00):
 ## 🧪 Testes Unitários e Compilação Local
 
 ```bash
+# Verificar ambiente
+make check-setup
+
 # Executar todos os testes
 make test
 
 # Compilar binários locais para Linux
-make build build-migrate
+make build
 
 # Limpar builds antigos
 make clean

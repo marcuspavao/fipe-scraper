@@ -5,34 +5,58 @@ BINARY         := fipe-scraper
 BINARY_MIGRATE := fipe-migrate
 BUILD_DIR      := ./build
 
-.PHONY: help build build-migrate test deploy build-deploy docker-build docker-up docker-down run start logs stop migrate migrate-status migrate-down migrate-vps clean
+.PHONY: help check-setup setup build build-migrate test deploy build-deploy docker-build docker-up docker-down up down run start logs stop migrate migrate-status migrate-down migrate-vps clean
 
 help:
 	@echo "🚗 FIPE Scraper - Comandos disponíveis:"
-	@echo "  make build         Compila os binários do scraper e migrate para Linux (amd64)"
+	@echo "  make check-setup   Verifica se dependências (docker, go, .env) estão presentes"
+	@echo "  make setup         Cria .env inicial a partir do .env.example e baixa dependências"
+	@echo "  make build         Compila os binários (scraper e migrate) para Linux (amd64)"
+	@echo "  make up            Sobe a stack completa via Docker Compose (MongoDB + Migrate + Scraper)"
+	@echo "  make down          Para e remove os containers Docker"
 	@echo "  make test          Roda os testes unitários"
-	@echo "  make docker-build  Gera a imagem Docker"
-	@echo "  make docker-up     Inicia os containers (MongoDB + Migrate + Scraper)"
-	@echo "  make docker-down   Para e remove os containers"
+	@echo "  make docker-build  Gera as imagens Docker"
 	@echo "  make deploy        Envia os binários e arquivos de serviço para a VPS"
 	@echo "  make build-deploy  Compila e faz o deploy em um único comando"
 	@echo "  make start         Inicia o scraper na VPS via nohup"
 	@echo "  make logs          Acompanha o log do scraper na VPS"
 	@echo "  make stop          Para o scraper na VPS"
 
+## Verifica ambiente
+check-setup:
+	@echo "🔍 Verificando ambiente..."
+	@command -v docker >/dev/null 2>&1 || { echo "❌ Docker não encontrado"; exit 1; }
+	@docker compose version >/dev/null 2>&1 || { echo "❌ Docker Compose v2 não encontrado"; exit 1; }
+	@if [ -f .env ]; then echo "✅ Arquivo .env encontrado"; else echo "⚠️  Arquivo .env não encontrado. Execute 'make setup' para criar"; fi
+	@echo "✅ Requisitos do ambiente OK!"
+
+## Configuração inicial
+setup:
+	@echo "⚙️ Configurando ambiente..."
+	@if [ ! -f .env ]; then \
+		cp .env.example .env; \
+		echo "✅ Archivo .env criado a partir de .env.example"; \
+	else \
+		echo "ℹ️  Arquivo .env já existe"; \
+	fi
+	@if command -v go >/dev/null 2>&1; then \
+		go mod download && echo "✅ Dependências Go baixadas"; \
+	fi
+	@echo "✅ Setup concluído!"
+
 ## Executa todos os testes unitários
 test:
 	@echo "🧪 Executando testes..."
 	go test -v ./...
 
-## Compila o scraper para Linux (AMD64)
-build:
+## Compila o scraper + migrate para Linux (AMD64)
+build: build-migrate
 	@echo "🔨 Compilando scraper para Linux (amd64)..."
 	@mkdir -p $(BUILD_DIR)
 	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-w -s" -o $(BUILD_DIR)/$(BINARY) ./cmd/scraper
-	@echo "✅ $(BUILD_DIR)/$(BINARY) gerado"
+	@echo "✅ Binários gerados em $(BUILD_DIR)/"
 
-## Compila o migrate para Linux (AMD64)
+## Compila apenas o migrate
 build-migrate:
 	@echo "🔨 Compilando migrate para Linux (amd64)..."
 	@mkdir -p $(BUILD_DIR)
@@ -44,10 +68,16 @@ docker-build:
 	@echo "🐳 Criando imagem Docker..."
 	docker compose build
 
-## Roda via Docker Compose
+## Atalho 'up' -> Sobe via Docker Compose
+up: docker-up
+
+## Sobe via Docker Compose
 docker-up:
 	@echo "🚀 Subindo stack com Docker Compose..."
 	docker compose up -d --build
+
+## Atalho 'down' -> Para containers
+down: docker-down
 
 ## Para containers Docker
 docker-down:
@@ -69,8 +99,8 @@ deploy:
 	fi
 	@echo "✅ Deploy concluído!"
 
-## Build (scraper + migrate) + Deploy em um único comando
-build-deploy: test build build-migrate deploy
+## Build + Deploy em um único comando
+build-deploy: test build deploy
 
 ## Roda o scraper em background na VPS via nohup
 start:
