@@ -1,0 +1,49 @@
+services:
+  mongodb:
+    image: mongo:7.0
+    container_name: fipe-mongodb
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_INITDB_ROOT_USERNAME:-root}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_INITDB_ROOT_PASSWORD:-example}
+    volumes:
+      - mongo_data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  migrate:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: fipe-migrate
+    entrypoint: ["/app/fipe-migrate", "-cmd=up"]
+    environment:
+      MONGO_URI: ${MONGO_URI:-mongodb://root:example@mongodb:27017/?authSource=admin}
+      MONGO_DATABASE: ${MONGO_DATABASE:-fipe}
+    depends_on:
+      mongodb:
+        condition: service_healthy
+
+  scraper:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: fipe-scraper
+    entrypoint: ["/app/fipe-scraper"]
+    environment:
+      MONGO_URI: ${MONGO_URI:-mongodb://root:example@mongodb:27017/?authSource=admin}
+      MONGO_DATABASE: ${MONGO_DATABASE:-fipe}
+      REQUEST_DELAY_MS: ${REQUEST_DELAY_MS:-1200}
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+
+volumes:
+  mongo_data:

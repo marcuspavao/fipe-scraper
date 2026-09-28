@@ -2,10 +2,12 @@ package scraper
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -22,7 +24,17 @@ var httpClient = &http.Client{
 	Timeout: 15 * time.Second,
 }
 
-func post(endpoint string, payload any) ([]byte, error) {
+// GetRequestDelay retorna o atraso configurado por variável de ambiente REQUEST_DELAY_MS (padrão 1200ms)
+func GetRequestDelay() time.Duration {
+	if val := os.Getenv("REQUEST_DELAY_MS"); val != "" {
+		if ms, err := strconv.Atoi(val); err == nil && ms >= 0 {
+			return time.Duration(ms) * time.Millisecond
+		}
+	}
+	return 1200 * time.Millisecond
+}
+
+func post(ctx context.Context, endpoint string, payload any) ([]byte, error) {
 	body, err := json.Marshal(payload)
 	if err != nil {
 		return nil, fmt.Errorf("serializar payload: %w", err)
@@ -32,7 +44,11 @@ func post(endpoint string, payload any) ([]byte, error) {
 	backoff := 5 * time.Second
 
 	for i := 0; i < maxRetries; i++ {
-		req, err := http.NewRequest("POST", baseURL+"/"+endpoint, bytes.NewBuffer(body))
+		if ctx != nil && ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+
+		req, err := http.NewRequestWithContext(ctx, "POST", baseURL+"/"+endpoint, bytes.NewBuffer(body))
 		if err != nil {
 			return nil, fmt.Errorf("criar requisição: %w", err)
 		}
@@ -44,7 +60,11 @@ func post(endpoint string, payload any) ([]byte, error) {
 		resp, err := httpClient.Do(req)
 		if err != nil {
 			if i < maxRetries-1 {
-				time.Sleep(backoff)
+				select {
+				case <-ctx.Done():
+					return nil, ctx.Err()
+				case <-time.After(backoff):
+				}
 				backoff *= 2
 				continue
 			}
@@ -55,7 +75,11 @@ func post(endpoint string, payload any) ([]byte, error) {
 		resp.Body.Close()
 		if err != nil {
 			if i < maxRetries-1 {
-				time.Sleep(backoff)
+				select {
+				case <-ctx.Done():
+					return nil, ctx.Err()
+				case <-time.After(backoff):
+				}
 				backoff *= 2
 				continue
 			}
@@ -69,7 +93,11 @@ func post(endpoint string, payload any) ([]byte, error) {
 		if resp.StatusCode == http.StatusForbidden || resp.StatusCode == http.StatusTooManyRequests {
 			fmt.Printf("⚠️ %d Forbidden/TooMany na FIPE (%s), aguardando %v...\n", resp.StatusCode, endpoint, backoff)
 			if i < maxRetries-1 {
-				time.Sleep(backoff)
+				select {
+				case <-ctx.Done():
+					return nil, ctx.Err()
+				case <-time.After(backoff):
+				}
 				backoff *= 2
 				continue
 			}
@@ -80,9 +108,12 @@ func post(endpoint string, payload any) ([]byte, error) {
 	return nil, fmt.Errorf("máximo de tentativas atingido para %s", endpoint)
 }
 
-// BuscarTabelas retorna os meses de referência disponíveis na FIPE
 func BuscarTabelas() ([]models.TabelaReferencia, error) {
-	data, err := post("ConsultarTabelaDeReferencia", map[string]any{})
+	return BuscarTabelasWithContext(context.Background())
+}
+
+func BuscarTabelasWithContext(ctx context.Context) ([]models.TabelaReferencia, error) {
+	data, err := post(ctx, "ConsultarTabelaDeReferencia", map[string]any{})
 	if err != nil {
 		return nil, err
 	}
@@ -105,9 +136,12 @@ func BuscarTabelas() ([]models.TabelaReferencia, error) {
 	return tabelas, nil
 }
 
-// BuscarMarcas retorna as marcas disponíveis para uma tabela de referência
 func BuscarMarcas(codigoTabela int) ([]models.FIPEMarca, error) {
-	data, err := post("ConsultarMarcas", map[string]any{
+	return BuscarMarcasWithContext(context.Background(), codigoTabela)
+}
+
+func BuscarMarcasWithContext(ctx context.Context, codigoTabela int) ([]models.FIPEMarca, error) {
+	data, err := post(ctx, "ConsultarMarcas", map[string]any{
 		"codigoTabelaReferencia": codigoTabela,
 		"codigoTipoVeiculo":      tipoVeiculoCarro,
 	})
@@ -122,9 +156,12 @@ func BuscarMarcas(codigoTabela int) ([]models.FIPEMarca, error) {
 	return marcas, nil
 }
 
-// BuscarModelos retorna os modelos e anos disponíveis para uma marca
 func BuscarModelos(codigoTabela, codigoMarca int) (*models.FIPEModelosResp, error) {
-	data, err := post("ConsultarModelos", map[string]any{
+	return BuscarModelosWithContext(context.Background(), codigoTabela, codigoMarca)
+}
+
+func BuscarModelosWithContext(ctx context.Context, codigoTabela, codigoMarca int) (*models.FIPEModelosResp, error) {
+	data, err := post(ctx, "ConsultarModelos", map[string]any{
 		"codigoTabelaReferencia": codigoTabela,
 		"codigoTipoVeiculo":      tipoVeiculoCarro,
 		"codigoMarca":            codigoMarca,
@@ -140,9 +177,12 @@ func BuscarModelos(codigoTabela, codigoMarca int) (*models.FIPEModelosResp, erro
 	return &resp, nil
 }
 
-// BuscarAnos retorna os anos disponíveis para um modelo específico
 func BuscarAnos(codigoTabela, codigoMarca, codigoModelo int) ([]models.FIPEAnoModelo, error) {
-	data, err := post("ConsultarAnoModelo", map[string]any{
+	return BuscarAnosWithContext(context.Background(), codigoTabela, codigoMarca, codigoModelo)
+}
+
+func BuscarAnosWithContext(ctx context.Context, codigoTabela, codigoMarca, codigoModelo int) ([]models.FIPEAnoModelo, error) {
+	data, err := post(ctx, "ConsultarAnoModelo", map[string]any{
 		"codigoTabelaReferencia": codigoTabela,
 		"codigoTipoVeiculo":      tipoVeiculoCarro,
 		"codigoMarca":            codigoMarca,
@@ -159,9 +199,12 @@ func BuscarAnos(codigoTabela, codigoMarca, codigoModelo int) ([]models.FIPEAnoMo
 	return anos, nil
 }
 
-// BuscarValor consulta o preço de um veículo específico na FIPE
 func BuscarValor(codigoTabela, codigoMarca, codigoModelo, anoModelo, codigoTipoCombustivel int) (*models.FIPEValorResp, error) {
-	data, err := post("ConsultarValorComTodosParametros", map[string]any{
+	return BuscarValorWithContext(context.Background(), codigoTabela, codigoMarca, codigoModelo, anoModelo, codigoTipoCombustivel)
+}
+
+func BuscarValorWithContext(ctx context.Context, codigoTabela, codigoMarca, codigoModelo, anoModelo, codigoTipoCombustivel int) (*models.FIPEValorResp, error) {
+	data, err := post(ctx, "ConsultarValorComTodosParametros", map[string]any{
 		"codigoTabelaReferencia": codigoTabela,
 		"codigoTipoVeiculo":      tipoVeiculoCarro,
 		"codigoMarca":            codigoMarca,

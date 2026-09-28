@@ -1,0 +1,17 @@
+[Unit]
+Description=FIPE Scraper Service
+After=network.target mongodb.service
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/fipe-scraper
+EnvironmentFile=/opt/fipe-scraper/.env
+ExecStart=/opt/fipe-scraper/fipe-scraper
+Restart=on-failure
+RestartSec=30s
+StandardOutput=append:/opt/fipe-scraper/scraper.log
+StandardError=append:/opt/fipe-scraper/scraper.log
+
+[Install]
+WantedBy=multi-user.target
