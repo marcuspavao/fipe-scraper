@@ -1,87 +1,157 @@
 # 🚗 FIPE Scraper
 
-Scraper em Go que coleta preços de veículos da [Tabela FIPE](https://veiculos.fipe.org.br/) e salva no MongoDB.
+Scraper robusto e de alto desempenho em Go que coleta preços de veículos da [Tabela FIPE](https://veiculos.fipe.org.br/) e salva no MongoDB.
 
-## Stack
+---
 
-- **Go 1.23**
-- **MongoDB** (driver oficial)
-- **Docker** + **Docker Compose**
+## 🛠️ Stack & Tecnologias
 
-## Estrutura
+- **Go 1.23** (com Context, Graceful Shutdown e suporte a sinais OS)
+- **MongoDB** (driver oficial com índices e migrations)
+- **Docker** & **Docker Compose** (Multi-stage build leve)
+- **Systemd / Cron / Makefile** (Opções flexíveis de deploy em produção)
+
+---
+
+## 📁 Estrutura do Projeto
 
 ```
 fipe-scraper/
-├── cmd/scraper/main.go          # Entry point (CLI com flags)
+├── cmd/
+│   ├── scraper/main.go          # Entry point do scraper
+│   └── migrate/main.go          # CLI de migrations do MongoDB
 ├── internal/
-│   ├── db/mongo.go              # Conexão MongoDB
-│   ├── models/models.go         # Structs de dados
-│   └── scraper/fipe.go          # Cliente da API FIPE
-├── Dockerfile
-├── docker-compose.yml
-└── .env.example
+│   ├── db/mongo.go              # Conexão e gerenciamento MongoDB
+│   ├── migrations/              # Definção e execução de migrations
+│   ├── models/models.go         # Structs e mapeamento de dados
+│   └── scraper/                 # Cliente de API da FIPE e retentativas
+│       ├── fipe.go
+│       └── fipe_test.go
+├── Dockerfile                   # Build multi-stage seguro (Alpine)
+├── docker-compose.yml           # Stack completa (MongoDB + Migrate + Scraper)
+├── fipe-scraper.service         # Template systemd para produção
+├── Makefile                     # Atalhos de build, test e deploy
+├── deploy.sh                    # Script de deploy SSH
+└── .env.example                 # Exemplo de variáveis de ambiente
 ```
 
-## Como usar
+---
 
-### Com Docker (recomendado)
+## ⚙️ Variáveis de Ambiente
 
-```bash
-# Scraping completo (todas as marcas da tabela mais recente)
-docker-compose up
+Crie um arquivo `.env` baseado no `.env.example`:
 
-# Com limites (para teste)
-docker-compose run scraper ./fipe-scraper -marcas=5 -modelos=3
+| Variável | Padrão | Descrição |
+|---|---|---|
+| `MONGO_URI` | `mongodb://root:example@mongodb:27017/?authSource=admin` | URI de conexão com MongoDB |
+| `MONGO_DATABASE` | `fipe` | Nome do banco de dados |
+| `REQUEST_DELAY_MS` | `1200` | Delay entre requisições na FIPE (evita rate limit) |
+| `VPS_USER` | `root` | Usuário SSH para deploy remoto |
+| `VPS_HOST` | `123.456.78.90` | IP ou Host da VPS em produção |
+| `VPS_PATH` | `/opt/fipe-scraper` | Diretório da aplicação na VPS |
 
-# Tabela específica
-docker-compose run scraper ./fipe-scraper -tabela=319
-```
+---
 
-### Local (requer Go 1.23+ e MongoDB)
+## 🚩 Flags CLI
 
-```bash
-cp .env.example .env
-go mod tidy
-
-# Todas as marcas, tabela mais recente
-go run ./cmd/scraper
-
-# Limitado para teste rápido
-go run ./cmd/scraper -marcas=3 -modelos=2
-```
-
-## Flags disponíveis
+O scraper aceita parâmetros para limitar a execução ou selecionar tabelas específicas:
 
 | Flag | Padrão | Descrição |
-|------|--------|-----------|
+|---|---|---|
 | `-tabela` | `0` | Código da tabela de referência (`0` = mais recente) |
-| `-marcas` | `0` | Limitar quantidade de marcas (`0` = todas) |
-| `-modelos` | `0` | Limitar modelos por marca (`0` = todos) |
+| `-marcas` | `0` | Limitar quantidade de marcas por tabela (`0` = todas) |
+| `-tabelas` | `0` | Limitar quantidade de tabelas processadas (`0` = todas) |
 
-## Dados salvos no MongoDB
+---
 
-Collection: `veiculos`
+## 🚀 Como Executar
 
-```json
-{
-  "tabela_codigo": 319,
-  "tabela_mes": "março/2026",
-  "marca": "Fiat",
-  "modelo": "Argo Drive 1.0",
-  "ano_modelo": 2022,
-  "codigo_fipe": "001297-0",
-  "preco": 68590.00,
-  "preco_str": "R$ 68.590,00",
-  "combustivel": "Gasolina",
-  "mes_referencia": "março de 2026",
-  "data_consulta": "2026-03-09T22:00:00Z"
-}
-```
+### 1. Com Docker Compose (Recomendado para Desenvolvimento e Produção Isolada)
 
-## Como agendar (cron no servidor)
+Suba toda a stack (MongoDB, aplica as migrations automaticamente e inicia o scraper):
 
 ```bash
-# Rodar todo dia 1 às 08h
-0 8 1 * * cd /home/marcus_dev/projects/fipe-scraper && docker-compose up --build
+# Copie o arquivo .env
+cp .env.example .env
+
+# Inicie os serviços
+docker compose up -d --build
+
+# Ver os logs do scraper
+docker compose logs -f scraper
 ```
-# fipe-scraper
+
+Para rodar comandos pontuais via Docker:
+
+```bash
+# Rodar scraper com flags
+docker compose run scraper -marcas=5 -tabelas=1
+
+# Rodar status de migrations
+docker compose run migrate -cmd=status
+```
+
+---
+
+## 🏭 Deploy em Máquina em Produção (VPS / Servidor Linux)
+
+Para rodar diretamente na máquina sem Docker (ou integrando ao MongoDB existente), você tem duas opções principais em produção:
+
+### Opção A: Usando Systemd Service (Recomendado para Execução Contínua ou Reinício Automático)
+
+1. Compilar os binários e enviar para o servidor:
+```bash
+make build-deploy
+# ou via script: ./deploy.sh
+```
+
+2. Na VPS, configure o serviço systemd:
+```bash
+# Copie o arquivo de serviço para o systemd
+cp /opt/fipe-scraper/fipe-scraper.service /etc/systemd/system/
+
+# Recarregue o daemon do systemd
+systemctl daemon-reload
+
+# Habilite e inicie o serviço
+systemctl enable fipe-scraper
+systemctl start fipe-scraper
+
+# Acompanhe os logs
+journalctl -u fipe-scraper -f
+```
+
+---
+
+### Opção B: Agendamento Automático via Cron (Para rodar todo mês/dia)
+
+Caso queira rodar o scraper apenas no primeiro dia de cada mês:
+
+```bash
+crontab -e
+```
+
+Adicione a linha (executa todo dia 1 às 08:00):
+
+```bash
+# Via Docker Compose:
+0 8 1 * * cd /opt/fipe-scraper && docker compose up --build -d
+
+# Ou via binário direto:
+0 8 1 * * cd /opt/fipe-scraper && ./fipe-scraper >> /opt/fipe-scraper/cron.log 2>&1
+```
+
+---
+
+## 🧪 Testes Unitários e Compilação Local
+
+```bash
+# Executar todos os testes
+make test
+
+# Compilar binários locais para Linux
+make build build-migrate
+
+# Limpar builds antigos
+make clean
+```
